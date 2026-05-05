@@ -17,7 +17,7 @@ const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, 'uploads');
 const DATA_FILE = path.join(DATA_DIR, 'links.json');
 const MAX_IMAGE_WIDTH = parseInt(process.env.MAX_IMAGE_WIDTH, 10) || 400;
 const MAX_IMAGE_HEIGHT = parseInt(process.env.MAX_IMAGE_HEIGHT, 10) || 300;
-const IMAGE_QUALITY = parseInt(process.env.IMAGE_QUALITY, 10) || 60;
+const IMAGE_QUALITY = parseInt(process.env.IMAGE_QUALITY, 10) || 80;
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
