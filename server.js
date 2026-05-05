@@ -44,47 +44,50 @@ const upload = multer({
   }
 });
 
-async function createWatermarkSvg(width, height) {
+function fitInsideDims(origW, origH, maxW, maxH) {
+  if (origW <= maxW && origH <= maxH) return { w: origW, h: origH };
+  const ratio = Math.min(maxW / origW, maxH / origH);
+  return { w: Math.round(origW * ratio), h: Math.round(origH * ratio) };
+}
+
+async function createWatermarkBuffer(width, height) {
   const text = 'SASA INTERNAL';
-  const fontSize = Math.max(16, Math.min(width, height) / 10);
+  const fontSize = Math.max(12, Math.min(width, height) / 10);
   const lines = Math.ceil(height / (fontSize * 3));
 
-  let tspans = '';
+  let texts = '';
   for (let i = 0; i < lines; i++) {
-    const y = fontSize * 3 * (i + 0.5);
-    tspans += `<text x="${width / 2}" y="${y}" text-anchor="middle" font-size="${fontSize}" font-family="Arial, sans-serif" font-weight="bold" fill="rgba(255,255,255,0.08)" transform="rotate(-30, ${width / 2}, ${y})">${text}</text>`;
+    const y = Math.round(fontSize * 3 * (i + 0.5));
+    texts += `<text x="${width / 2}" y="${y}" text-anchor="middle" font-size="${fontSize}" font-family="Arial, sans-serif" font-weight="bold" fill="rgba(255,255,255,0.08)" transform="rotate(-30, ${width / 2}, ${y})">${text}</text>`;
   }
 
-  return Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">${tspans}</svg>`);
+  const svg = Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">${texts}</svg>`);
+  return sharp(svg).png().toBuffer();
 }
 
 async function compressImage(filePath) {
   const outputPath = filePath.replace(/\.[^.]+$/, '.webp');
   const metadata = await sharp(filePath).metadata();
-  const origWidth = metadata.width;
-  const origHeight = metadata.height;
-
-  const targetW = Math.min(origWidth, MAX_IMAGE_WIDTH);
-  const targetH = Math.min(origHeight, MAX_IMAGE_HEIGHT);
-
-  const watermarkSvg = await createWatermarkSvg(targetW, targetH);
+  const origW = metadata.width;
+  const origH = metadata.height;
 
   const qualitySteps = [40, 25, 15, 8, 5];
   const scaleSteps = [1, 0.75, 0.5, 0.35];
 
-  let result = null;
+  let bestBuf = null;
 
   for (const scale of scaleSteps) {
-    const w = Math.max(Math.round(targetW * scale), 50);
-    const h = Math.max(Math.round(targetH * scale), 38);
+    const maxW = Math.max(Math.round(MAX_IMAGE_WIDTH * scale), 50);
+    const maxH = Math.max(Math.round(MAX_IMAGE_HEIGHT * scale), 38);
+    const { w, h } = fitInsideDims(origW, origH, maxW, maxH);
+
+    const wmBuf = await createWatermarkBuffer(w, h);
 
     for (const quality of qualitySteps) {
-      const wmSvg = await createWatermarkSvg(w, h);
       const buf = await sharp(filePath)
         .resize(w, h, { fit: 'inside', withoutEnlargement: true })
+        .composite([{ input: wmBuf, blend: 'over' }])
         .webp({ quality, effort: 4 })
-        .withMetadata(false)
-        .composite([{ input: wmSvg, blend: 'over' }])
         .toBuffer();
 
       if (buf.length <= TARGET_SIZE_BYTES) {
@@ -93,13 +96,13 @@ async function compressImage(filePath) {
         return path.basename(outputPath);
       }
 
-      if (!result || buf.length < result.length) {
-        result = buf;
+      if (!bestBuf || buf.length < bestBuf.length) {
+        bestBuf = buf;
       }
     }
   }
 
-  fs.writeFileSync(outputPath, result);
+  fs.writeFileSync(outputPath, bestBuf);
   fs.unlinkSync(filePath);
   return path.basename(outputPath);
 }
