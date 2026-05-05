@@ -37,7 +37,7 @@ function bindEvents() {
   loginForm.addEventListener('submit', handleLogin);
 
   logoutBtn.addEventListener('click', handleLogout);
-  addBtn.addEventListener('click', openAddLink);
+  addBtn.addEventListener('click', function () { openAddLink(); });
   closeLinkBtn.addEventListener('click', function () { closeModal(linkModal); });
   closeDeleteBtn.addEventListener('click', function () { closeModal(deleteModal); });
 
