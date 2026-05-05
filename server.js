@@ -6,7 +6,7 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
-const sharp = require('sharp');
+const Jimp = require('jimp');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -50,61 +50,26 @@ function fitInsideDims(origW, origH, maxW, maxH) {
   return { w: Math.round(origW * ratio), h: Math.round(origH * ratio) };
 }
 
-async function createWatermarkBuffer(width, height) {
-  try {
-    const text = 'SASA INTERNAL';
-    const fontSize = Math.max(12, Math.min(width, height) / 10);
-    const lines = Math.ceil(height / (fontSize * 3));
-
-    let texts = '';
-    for (let i = 0; i < lines; i++) {
-      const y = Math.round(fontSize * 3 * (i + 0.5));
-      texts += `<text x="${width / 2}" y="${y}" text-anchor="middle" font-size="${fontSize}" font-family="sans-serif" font-weight="bold" fill="rgba(255,255,255,0.08)" transform="rotate(-30, ${width / 2}, ${y})">${text}</text>`;
-    }
-
-    const svg = Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">${texts}</svg>`);
-    return await sharp(svg).png().toBuffer();
-  } catch {
-    return null;
-  }
-}
-
 async function compressImage(filePath) {
   try {
-    const outputPath = filePath.replace(/\.[^.]+$/, '.webp');
-    const metadata = await sharp(filePath).metadata();
-    const origW = metadata.width;
-    const origH = metadata.height;
+    const ext = path.extname(filePath).toLowerCase();
+    const outputPath = filePath.replace(ext, '.jpg');
+    const image = await Jimp.read(filePath);
 
-    if (!origW || !origH) throw new Error('Cannot read image dimensions');
+    const { w, h } = fitInsideDims(image.bitmap.width, image.bitmap.height, MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT);
+    image.resize(w, h);
 
-    const qualitySteps = [40, 25, 15, 8, 5];
-    const scaleSteps = [1, 0.75, 0.5, 0.35];
+    const qualitySteps = ext === '.gif' ? [30, 20, 10] : [30, 20, 15, 10, 8, 5];
     let bestBuf = null;
 
-    for (const scale of scaleSteps) {
-      const maxW = Math.max(Math.round(MAX_IMAGE_WIDTH * scale), 50);
-      const maxH = Math.max(Math.round(MAX_IMAGE_HEIGHT * scale), 38);
-      const { w, h } = fitInsideDims(origW, origH, maxW, maxH);
-      const wmBuf = await createWatermarkBuffer(w, h);
-
-      for (const quality of qualitySteps) {
-        let pipeline = sharp(filePath)
-          .resize(w, h, { fit: 'inside', withoutEnlargement: true });
-
-        if (wmBuf) {
-          try { pipeline = pipeline.composite([{ input: wmBuf, blend: 'over' }]); } catch {}
-        }
-
-        const buf = await pipeline.webp({ quality, effort: 4 }).toBuffer();
-
-        if (buf.length <= TARGET_SIZE_BYTES) {
-          fs.writeFileSync(outputPath, buf);
-          fs.unlinkSync(filePath);
-          return path.basename(outputPath);
-        }
-        if (!bestBuf || buf.length < bestBuf.length) bestBuf = buf;
+    for (const q of qualitySteps) {
+      const buf = await image.clone().quality(q).getBufferAsync(Jimp.MIME_JPEG);
+      if (buf.length <= TARGET_SIZE_BYTES) {
+        fs.writeFileSync(outputPath, buf);
+        fs.unlinkSync(filePath);
+        return path.basename(outputPath);
       }
+      if (!bestBuf || buf.length < bestBuf.length) bestBuf = buf;
     }
 
     fs.writeFileSync(outputPath, bestBuf);
@@ -261,16 +226,20 @@ app.post('/api/auth/verify', authMiddleware, (req, res) => {
 
 app.get('/api/diag', async (req, res) => {
   try {
-    await sharp({ create: { width: 1, height: 1, channels: 3, background: { r: 0, g: 0, b: 0 } } }).webp().toBuffer();
-    res.json({ sharp: 'ok' });
+    const img = new Jimp(1, 1, 0x000000FF);
+    const buf = await img.getBufferAsync(Jimp.MIME_JPEG);
+    res.json({ engine: 'jimp', status: 'ok', testSize: buf.length });
   } catch (e) {
-    res.json({ sharp: 'fail', error: e.message });
+    res.json({ engine: 'jimp', status: 'fail', error: e.message });
   }
 });
 
 app.listen(PORT, () => {
   console.log(`PowerBI Link Hub running at http://localhost:${PORT}`);
-  sharp({ create: { width: 1, height: 1, channels: 3, background: { r: 0, g: 0, b: 0 } } }).webp().toBuffer()
-    .then(() => console.log('sharp: OK'))
-    .catch(e => console.error('sharp: FAIL -', e.message));
+  try {
+    new Jimp(1, 1, 0x000000FF);
+    console.log('jimp: OK');
+  } catch (e) {
+    console.error('jimp: FAIL -', e.message);
+  }
 });
