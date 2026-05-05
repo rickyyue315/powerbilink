@@ -15,9 +15,9 @@ const JWT_SECRET = process.env.JWT_SECRET || 'powerbi-link-hub-secret';
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, 'uploads');
 const DATA_FILE = path.join(DATA_DIR, 'links.json');
-const MAX_IMAGE_WIDTH = parseInt(process.env.MAX_IMAGE_WIDTH, 10) || 800;
-const MAX_IMAGE_HEIGHT = parseInt(process.env.MAX_IMAGE_HEIGHT, 10) || 600;
-const TARGET_SIZE_BYTES = parseInt(process.env.TARGET_SIZE_KB, 10) * 1024 || 10 * 1024;
+const MAX_IMAGE_WIDTH = parseInt(process.env.MAX_IMAGE_WIDTH, 10) || 400;
+const MAX_IMAGE_HEIGHT = parseInt(process.env.MAX_IMAGE_HEIGHT, 10) || 300;
+const IMAGE_QUALITY = parseInt(process.env.IMAGE_QUALITY, 10) || 20;
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -54,32 +54,19 @@ async function compressImage(filePath) {
   try {
     const ext = path.extname(filePath).toLowerCase();
     const outputPath = filePath.replace(ext, '.jpg');
-    
+
     const inputBuf = fs.readFileSync(filePath);
     const image = await Jimp.read(inputBuf);
 
     const { w, h } = fitInsideDims(image.bitmap.width, image.bitmap.height, MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT);
     image.resize({ w, h });
 
-    const qualitySteps = ext === '.gif' ? [30, 20, 10] : [80, 50, 30, 20, 15, 10, 5];
-    let bestBuf = null;
+    const quality = ext === '.gif' ? Math.max(IMAGE_QUALITY - 10, 5) : IMAGE_QUALITY;
+    const buf = await image.getBuffer('image/jpeg', { quality });
 
-    for (const q of qualitySteps) {
-      const buf = await image.clone().getBuffer('image/jpeg', { quality: q });
-      if (buf.length <= TARGET_SIZE_BYTES) {
-        fs.writeFileSync(outputPath, buf);
-        if (!fs.existsSync(outputPath)) throw new Error('write failed: output not found');
-        fs.unlinkSync(filePath);
-        console.log('compressImage OK:', path.basename(outputPath), buf.length, 'bytes');
-        return path.basename(outputPath);
-      }
-      if (!bestBuf || buf.length < bestBuf.length) bestBuf = buf;
-    }
-
-    fs.writeFileSync(outputPath, bestBuf);
-    if (!fs.existsSync(outputPath)) throw new Error('write failed: output not found');
+    fs.writeFileSync(outputPath, buf);
     fs.unlinkSync(filePath);
-    console.log('compressImage OK (best):', path.basename(outputPath), bestBuf.length, 'bytes');
+    console.log('compressImage OK:', path.basename(outputPath), w + 'x' + h, buf.length, 'bytes');
     return path.basename(outputPath);
   } catch (err) {
     console.error('compressImage failed, keeping original:', err.message);
