@@ -9,6 +9,6 @@ COPY . .
 
 RUN mkdir -p data uploads
 
-EXPOSE 3000
+EXPOSE 8080
 
 CMD ["node", "server.js"]
