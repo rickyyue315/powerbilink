@@ -1,0 +1,16 @@
+{
+  "name": "powerbi-link-hub",
+  "version": "1.0.0",
+  "description": "Internal website for centralizing PowerBI report links",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "multer": "^1.4.5-lts.1",
+    "jsonwebtoken": "^9.0.2",
+    "dotenv": "^16.4.5",
+    "uuid": "^10.0.0"
+  }
+}

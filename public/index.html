@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PowerBI Report Link Hub</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<header class="header">
+  <div class="header-inner">
+    <h1 class="logo">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      PowerBI Report Hub
+    </h1>
+    <div class="header-actions">
+      <button id="loginBtn" class="btn btn-outline">管理員登入</button>
+      <button id="logoutBtn" class="btn btn-outline" style="display:none;">登出</button>
+      <button id="addBtn" class="btn btn-primary" style="display:none;">+ 新增連結</button>
+    </div>
+  </div>
+</header>
+
+<main class="main">
+  <div class="toolbar">
+    <div class="search-box">
+      <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" id="searchInput" placeholder="搜尋報表名稱、簡介或網址...">
+    </div>
+    <select id="categoryFilter" class="select">
+      <option value="">全部分類</option>
+    </select>
+  </div>
+
+  <div id="linksContainer" class="cards-grid"></div>
+
+  <div id="emptyState" class="empty-state" style="display:none;">
+    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+    <p>暫無 PowerBI 報表連結</p>
+    <p class="sub">管理員登入後可新增連結</p>
+  </div>
+</main>
+
+<!-- Login Modal -->
+<div id="loginModal" class="modal-overlay" style="display:none;">
+  <div class="modal">
+    <h2>管理員登入</h2>
+    <form id="loginForm">
+      <label class="field">
+        <span>管理員密碼</span>
+        <input type="password" id="loginPassword" inputmode="numeric" maxlength="8" pattern="[0-9]{8}" placeholder="請輸入8位數字密碼" required>
+      </label>
+      <p id="loginError" class="error-msg" style="display:none;"></p>
+      <div class="modal-actions">
+        <button type="button" id="closeLoginBtn" class="btn btn-outline">取消</button>
+        <button type="submit" class="btn btn-primary">登入</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Link Form Modal -->
+<div id="linkModal" class="modal-overlay" style="display:none;">
+  <div class="modal modal-wide">
+    <h2 id="linkModalTitle">新增 PowerBI 連結</h2>
+    <form id="linkForm" enctype="multipart/form-data">
+      <input type="hidden" id="linkId">
+      <label class="field">
+        <span>報表標題 <em>*</em></span>
+        <input type="text" id="linkTitle" placeholder="例如：銷售分析報告" required>
+      </label>
+      <label class="field">
+        <span>PowerBI 連結 <em>*</em></span>
+        <input type="url" id="linkUrl" placeholder="https://app.powerbi.com/..." required>
+      </label>
+      <label class="field">
+        <span>分類</span>
+        <input type="text" id="linkCategory" placeholder="例如：財務、銷售、人力資源" list="categoryList">
+        <datalist id="categoryList"></datalist>
+      </label>
+      <label class="field">
+        <span>簡介</span>
+        <textarea id="linkDescription" rows="3" placeholder="簡單介紹這個報表的用途和內容..."></textarea>
+      </label>
+      <label class="field">
+        <span>截圖預覽</span>
+        <div class="upload-area" id="uploadArea">
+          <input type="file" id="linkImage" accept="image/*" hidden>
+          <div class="upload-placeholder" id="uploadPlaceholder">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            <span>點擊此處上傳截圖 (jpg/png, 最大5MB)</span>
+          </div>
+          <img id="imagePreview" src="" alt="Preview" style="display:none;" class="upload-preview">
+          <button type="button" id="removeImageBtn" class="btn btn-sm btn-outline" style="display:none;">移除截圖</button>
+        </div>
+      </label>
+      <p id="linkFormError" class="error-msg" style="display:none;"></p>
+      <div class="modal-actions">
+        <button type="button" id="closeLinkBtn" class="btn btn-outline">取消</button>
+        <button type="submit" class="btn btn-primary">儲存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Delete Confirm Modal -->
+<div id="deleteModal" class="modal-overlay" style="display:none;">
+  <div class="modal modal-sm">
+    <h2>確認刪除</h2>
+    <p id="deleteMsg">確定要刪除這個連結嗎？此操作無法還原。</p>
+    <p id="deleteLinkTitle" class="delete-title"></p>
+    <div class="modal-actions">
+      <button type="button" id="closeDeleteBtn" class="btn btn-outline">取消</button>
+      <button type="button" id="confirmDeleteBtn" class="btn btn-danger">刪除</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script src="/js/admin.js"></script>
+</body>
+</html>
