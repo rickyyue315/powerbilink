@@ -54,7 +54,9 @@ async function compressImage(filePath) {
   try {
     const ext = path.extname(filePath).toLowerCase();
     const outputPath = filePath.replace(ext, '.jpg');
-    const image = await Jimp.read(filePath);
+    
+    const inputBuf = fs.readFileSync(filePath);
+    const image = await Jimp.read(inputBuf);
 
     const { w, h } = fitInsideDims(image.bitmap.width, image.bitmap.height, MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT);
     image.resize({ w, h });
@@ -66,14 +68,18 @@ async function compressImage(filePath) {
       const buf = await image.clone().getBuffer('image/jpeg', { quality: q });
       if (buf.length <= TARGET_SIZE_BYTES) {
         fs.writeFileSync(outputPath, buf);
+        if (!fs.existsSync(outputPath)) throw new Error('write failed: output not found');
         fs.unlinkSync(filePath);
+        console.log('compressImage OK:', path.basename(outputPath), buf.length, 'bytes');
         return path.basename(outputPath);
       }
       if (!bestBuf || buf.length < bestBuf.length) bestBuf = buf;
     }
 
     fs.writeFileSync(outputPath, bestBuf);
+    if (!fs.existsSync(outputPath)) throw new Error('write failed: output not found');
     fs.unlinkSync(filePath);
+    console.log('compressImage OK (best):', path.basename(outputPath), bestBuf.length, 'bytes');
     return path.basename(outputPath);
   } catch (err) {
     console.error('compressImage failed, keeping original:', err.message);
@@ -226,10 +232,15 @@ app.post('/api/auth/verify', authMiddleware, (req, res) => {
 
 app.get('/api/diag', async (req, res) => {
   try {
-    const pixels = Buffer.alloc(4, 255);
-    const img = await Jimp.fromBitmap({ data: pixels, width: 1, height: 1 });
-    const buf = await img.getBuffer('image/jpeg');
-    res.json({ engine: 'jimp', status: 'ok', testSize: buf.length });
+    const pixels = Buffer.alloc(400 * 300 * 4);
+    for (let i = 0; i < pixels.length; i++) pixels[i] = Math.floor(Math.random() * 256);
+    const testPath = path.join(UPLOADS_DIR, '_diag_test.jpg');
+    const img = await Jimp.fromBitmap({ data: pixels, width: 400, height: 300 });
+    await img.write(testPath);
+    const exists = fs.existsSync(testPath);
+    const size = exists ? fs.statSync(testPath).size : 0;
+    fs.unlinkSync(testPath);
+    res.json({ engine: 'jimp', status: 'ok', fileWrite: exists, fileSize: size });
   } catch (e) {
     res.json({ engine: 'jimp', status: 'fail', error: e.message });
   }
