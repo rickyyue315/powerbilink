@@ -6,7 +6,7 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
-const Jimp = require('jimp');
+const { Jimp, JimpMime } = require('jimp');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -57,13 +57,13 @@ async function compressImage(filePath) {
     const image = await Jimp.read(filePath);
 
     const { w, h } = fitInsideDims(image.bitmap.width, image.bitmap.height, MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT);
-    image.resize(w, h);
+    image.resize({ w, h });
 
-    const qualitySteps = ext === '.gif' ? [30, 20, 10] : [30, 20, 15, 10, 8, 5];
+    const qualitySteps = ext === '.gif' ? [30, 20, 10] : [80, 50, 30, 20, 15, 10, 5];
     let bestBuf = null;
 
     for (const q of qualitySteps) {
-      const buf = await image.clone().quality(q).getBufferAsync(Jimp.MIME_JPEG);
+      const buf = await image.clone().getBuffer('image/jpeg', { quality: q });
       if (buf.length <= TARGET_SIZE_BYTES) {
         fs.writeFileSync(outputPath, buf);
         fs.unlinkSync(filePath);
@@ -226,8 +226,9 @@ app.post('/api/auth/verify', authMiddleware, (req, res) => {
 
 app.get('/api/diag', async (req, res) => {
   try {
-    const img = new Jimp(1, 1, 0x000000FF);
-    const buf = await img.getBufferAsync(Jimp.MIME_JPEG);
+    const pixels = Buffer.alloc(4, 255);
+    const img = await Jimp.fromBitmap({ data: pixels, width: 1, height: 1 });
+    const buf = await img.getBuffer('image/jpeg');
     res.json({ engine: 'jimp', status: 'ok', testSize: buf.length });
   } catch (e) {
     res.json({ engine: 'jimp', status: 'fail', error: e.message });
@@ -237,7 +238,8 @@ app.get('/api/diag', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`PowerBI Link Hub running at http://localhost:${PORT}`);
   try {
-    new Jimp(1, 1, 0x000000FF);
+    const pixels = Buffer.alloc(4, 255);
+    Jimp.fromBitmap({ data: pixels, width: 1, height: 1 });
     console.log('jimp: OK');
   } catch (e) {
     console.error('jimp: FAIL -', e.message);
