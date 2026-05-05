@@ -259,6 +259,18 @@ app.post('/api/auth/verify', authMiddleware, (req, res) => {
   res.json({ valid: true });
 });
 
+app.get('/api/diag', async (req, res) => {
+  try {
+    await sharp({ create: { width: 1, height: 1, channels: 3, background: { r: 0, g: 0, b: 0 } } }).webp().toBuffer();
+    res.json({ sharp: 'ok' });
+  } catch (e) {
+    res.json({ sharp: 'fail', error: e.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`PowerBI Link Hub running at http://localhost:${PORT}`);
+  sharp({ create: { width: 1, height: 1, channels: 3, background: { r: 0, g: 0, b: 0 } } }).webp().toBuffer()
+    .then(() => console.log('sharp: OK'))
+    .catch(e => console.error('sharp: FAIL -', e.message));
 });
