@@ -17,7 +17,7 @@ const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, 'uploads');
 const DATA_FILE = path.join(DATA_DIR, 'links.json');
 const MAX_IMAGE_WIDTH = parseInt(process.env.MAX_IMAGE_WIDTH, 10) || 800;
 const MAX_IMAGE_HEIGHT = parseInt(process.env.MAX_IMAGE_HEIGHT, 10) || 600;
-const IMAGE_QUALITY = parseInt(process.env.IMAGE_QUALITY, 10) || 70;
+const TARGET_SIZE_BYTES = parseInt(process.env.TARGET_SIZE_KB, 10) * 1024 || 10 * 1024;
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -61,26 +61,46 @@ async function createWatermarkSvg(width, height) {
 async function compressImage(filePath) {
   const outputPath = filePath.replace(/\.[^.]+$/, '.webp');
   const metadata = await sharp(filePath).metadata();
-  const { width, height } = metadata;
+  const origWidth = metadata.width;
+  const origHeight = metadata.height;
 
-  let pipeline = sharp(filePath)
-    .resize(MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT, { fit: 'inside', withoutEnlargement: true })
-    .webp({ quality: IMAGE_QUALITY, effort: 4 })
-    .withMetadata(false);
+  const targetW = Math.min(origWidth, MAX_IMAGE_WIDTH);
+  const targetH = Math.min(origHeight, MAX_IMAGE_HEIGHT);
 
-  const watermarkSvg = await createWatermarkSvg(
-    Math.min(width, MAX_IMAGE_WIDTH),
-    Math.min(height, MAX_IMAGE_HEIGHT)
-  );
-  pipeline = pipeline.composite([{
-    input: watermarkSvg,
-    blend: 'over'
-  }]);
+  const watermarkSvg = await createWatermarkSvg(targetW, targetH);
 
-  await pipeline.toFile(outputPath);
+  const qualitySteps = [40, 25, 15, 8, 5];
+  const scaleSteps = [1, 0.75, 0.5, 0.35];
 
+  let result = null;
+
+  for (const scale of scaleSteps) {
+    const w = Math.max(Math.round(targetW * scale), 50);
+    const h = Math.max(Math.round(targetH * scale), 38);
+
+    for (const quality of qualitySteps) {
+      const wmSvg = await createWatermarkSvg(w, h);
+      const buf = await sharp(filePath)
+        .resize(w, h, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality, effort: 4 })
+        .withMetadata(false)
+        .composite([{ input: wmSvg, blend: 'over' }])
+        .toBuffer();
+
+      if (buf.length <= TARGET_SIZE_BYTES) {
+        fs.writeFileSync(outputPath, buf);
+        fs.unlinkSync(filePath);
+        return path.basename(outputPath);
+      }
+
+      if (!result || buf.length < result.length) {
+        result = buf;
+      }
+    }
+  }
+
+  fs.writeFileSync(outputPath, result);
   fs.unlinkSync(filePath);
-
   return path.basename(outputPath);
 }
 
