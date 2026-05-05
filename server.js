@@ -24,7 +24,15 @@ if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/uploads', express.static(UPLOADS_DIR));
+
+app.get('/uploads/:filename', (req, res) => {
+  const filePath = path.join(UPLOADS_DIR, req.params.filename);
+  if (fs.existsSync(filePath)) {
+    res.type(path.extname(filePath)).sendFile(filePath);
+  } else {
+    res.status(404).end();
+  }
+});
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOADS_DIR),
@@ -66,7 +74,8 @@ async function compressImage(filePath) {
 
     fs.writeFileSync(outputPath, buf);
     fs.unlinkSync(filePath);
-    console.log('compressImage OK:', path.basename(outputPath), w + 'x' + h, buf.length, 'bytes');
+    const url = `/uploads/${path.basename(outputPath)}`;
+    console.log('compressImage OK:', url, w + 'x' + h, buf.length, 'bytes');
     return path.basename(outputPath);
   } catch (err) {
     console.error('compressImage failed, keeping original:', err.message);
@@ -218,19 +227,29 @@ app.post('/api/auth/verify', authMiddleware, (req, res) => {
 });
 
 app.get('/api/diag', async (req, res) => {
+  const result = {};
   try {
     const pixels = Buffer.alloc(400 * 300 * 4);
     for (let i = 0; i < pixels.length; i++) pixels[i] = Math.floor(Math.random() * 256);
     const testPath = path.join(UPLOADS_DIR, '_diag_test.jpg');
     const img = await Jimp.fromBitmap({ data: pixels, width: 400, height: 300 });
     await img.write(testPath);
-    const exists = fs.existsSync(testPath);
-    const size = exists ? fs.statSync(testPath).size : 0;
+    result.engine = 'jimp';
+    result.status = 'ok';
+    result.fileWrite = fs.existsSync(testPath);
+    result.fileSize = result.fileWrite ? fs.statSync(testPath).size : 0;
     fs.unlinkSync(testPath);
-    res.json({ engine: 'jimp', status: 'ok', fileWrite: exists, fileSize: size });
+    
+    // List uploads directory
+    const files = fs.readdirSync(UPLOADS_DIR);
+    result.uploadsCount = files.length;
+    result.recentFiles = files.slice(-5);
   } catch (e) {
-    res.json({ engine: 'jimp', status: 'fail', error: e.message });
+    result.engine = 'jimp';
+    result.status = 'fail';
+    result.error = e.message;
   }
+  res.json(result);
 });
 
 app.listen(PORT, () => {
