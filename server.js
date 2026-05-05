@@ -51,18 +51,22 @@ function fitInsideDims(origW, origH, maxW, maxH) {
 }
 
 async function createWatermarkBuffer(width, height) {
-  const text = 'SASA INTERNAL';
-  const fontSize = Math.max(12, Math.min(width, height) / 10);
-  const lines = Math.ceil(height / (fontSize * 3));
+  try {
+    const text = 'SASA INTERNAL';
+    const fontSize = Math.max(12, Math.min(width, height) / 10);
+    const lines = Math.ceil(height / (fontSize * 3));
 
-  let texts = '';
-  for (let i = 0; i < lines; i++) {
-    const y = Math.round(fontSize * 3 * (i + 0.5));
-    texts += `<text x="${width / 2}" y="${y}" text-anchor="middle" font-size="${fontSize}" font-family="Arial, sans-serif" font-weight="bold" fill="rgba(255,255,255,0.08)" transform="rotate(-30, ${width / 2}, ${y})">${text}</text>`;
+    let texts = '';
+    for (let i = 0; i < lines; i++) {
+      const y = Math.round(fontSize * 3 * (i + 0.5));
+      texts += `<text x="${width / 2}" y="${y}" text-anchor="middle" font-size="${fontSize}" font-family="sans-serif" font-weight="bold" fill="rgba(255,255,255,0.08)" transform="rotate(-30, ${width / 2}, ${y})">${text}</text>`;
+    }
+
+    const svg = Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">${texts}</svg>`);
+    return await sharp(svg).png().toBuffer();
+  } catch {
+    return null;
   }
-
-  const svg = Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">${texts}</svg>`);
-  return sharp(svg).png().toBuffer();
 }
 
 async function compressImage(filePath) {
@@ -84,9 +88,16 @@ async function compressImage(filePath) {
     const wmBuf = await createWatermarkBuffer(w, h);
 
     for (const quality of qualitySteps) {
-      const buf = await sharp(filePath)
-        .resize(w, h, { fit: 'inside', withoutEnlargement: true })
-        .composite([{ input: wmBuf, blend: 'over' }])
+      let pipeline = sharp(filePath)
+        .resize(w, h, { fit: 'inside', withoutEnlargement: true });
+
+      if (wmBuf) {
+        try {
+          pipeline = pipeline.composite([{ input: wmBuf, blend: 'over' }]);
+        } catch {}
+      }
+
+      const buf = await pipeline
         .webp({ quality, effort: 4 })
         .toBuffer();
 
@@ -205,7 +216,7 @@ app.post('/api/links', authMiddleware, upload.single('image'), async (req, res) 
       const tmp = path.join(UPLOADS_DIR, req.file.filename);
       if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
     }
-    res.status(500).json({ error: '圖片處理失敗，請重試' });
+    res.status(500).json({ error: '圖片處理失敗: ' + (err.message || String(err)) });
   }
 });
 
@@ -244,7 +255,7 @@ app.put('/api/links/:id', authMiddleware, upload.single('image'), async (req, re
       const tmp = path.join(UPLOADS_DIR, req.file.filename);
       if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
     }
-    res.status(500).json({ error: '圖片處理失敗，請重試' });
+    res.status(500).json({ error: '圖片處理失敗: ' + (err.message || String(err)) });
   }
 });
 
