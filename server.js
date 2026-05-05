@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
+const sharp = require('sharp');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -14,6 +15,9 @@ const JWT_SECRET = process.env.JWT_SECRET || 'powerbi-link-hub-secret';
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, 'uploads');
 const DATA_FILE = path.join(DATA_DIR, 'links.json');
+const MAX_IMAGE_WIDTH = parseInt(process.env.MAX_IMAGE_WIDTH, 10) || 800;
+const MAX_IMAGE_HEIGHT = parseInt(process.env.MAX_IMAGE_HEIGHT, 10) || 600;
+const IMAGE_QUALITY = parseInt(process.env.IMAGE_QUALITY, 10) || 70;
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -32,13 +36,53 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const allowed = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
+    const allowed = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tiff'];
     const ext = path.extname(file.originalname).toLowerCase();
     cb(null, allowed.includes(ext));
   }
 });
+
+async function createWatermarkSvg(width, height) {
+  const text = 'SASA INTERNAL';
+  const fontSize = Math.max(16, Math.min(width, height) / 10);
+  const lines = Math.ceil(height / (fontSize * 3));
+
+  let tspans = '';
+  for (let i = 0; i < lines; i++) {
+    const y = fontSize * 3 * (i + 0.5);
+    tspans += `<text x="${width / 2}" y="${y}" text-anchor="middle" font-size="${fontSize}" font-family="Arial, sans-serif" font-weight="bold" fill="rgba(255,255,255,0.08)" transform="rotate(-30, ${width / 2}, ${y})">${text}</text>`;
+  }
+
+  return Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">${tspans}</svg>`);
+}
+
+async function compressImage(filePath) {
+  const outputPath = filePath.replace(/\.[^.]+$/, '.webp');
+  const metadata = await sharp(filePath).metadata();
+  const { width, height } = metadata;
+
+  let pipeline = sharp(filePath)
+    .resize(MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT, { fit: 'inside', withoutEnlargement: true })
+    .webp({ quality: IMAGE_QUALITY, effort: 4 })
+    .withMetadata(false);
+
+  const watermarkSvg = await createWatermarkSvg(
+    Math.min(width, MAX_IMAGE_WIDTH),
+    Math.min(height, MAX_IMAGE_HEIGHT)
+  );
+  pipeline = pipeline.composite([{
+    input: watermarkSvg,
+    blend: 'over'
+  }]);
+
+  await pipeline.toFile(outputPath);
+
+  fs.unlinkSync(filePath);
+
+  return path.basename(outputPath);
+}
 
 function readLinks() {
   try {
@@ -102,50 +146,83 @@ app.get('/api/categories', (req, res) => {
   res.json(cats);
 });
 
-app.post('/api/links', authMiddleware, upload.single('image'), (req, res) => {
-  const { title, url, description, category } = req.body;
-  if (!title || !url) {
-    return res.status(400).json({ error: '標題和網址為必填' });
+app.post('/api/links', authMiddleware, upload.single('image'), async (req, res) => {
+  try {
+    const { title, url, description, category } = req.body;
+    if (!title || !url) {
+      if (req.file) {
+        const tmp = path.join(UPLOADS_DIR, req.file.filename);
+        if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+      }
+      return res.status(400).json({ error: '標題和網址為必填' });
+    }
+
+    let imageFilename = null;
+    if (req.file) {
+      imageFilename = await compressImage(path.join(UPLOADS_DIR, req.file.filename));
+    }
+
+    const data = readLinks();
+    const link = {
+      id: uuidv4(),
+      title,
+      url,
+      description: description || '',
+      imageUrl: imageFilename ? `/uploads/${imageFilename}` : null,
+      category: category || '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    data.links.push(link);
+    writeLinks(data);
+    res.status(201).json(link);
+  } catch (err) {
+    console.error('Image compression error:', err);
+    if (req.file) {
+      const tmp = path.join(UPLOADS_DIR, req.file.filename);
+      if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+    }
+    res.status(500).json({ error: '圖片處理失敗，請重試' });
   }
-  const data = readLinks();
-  const link = {
-    id: uuidv4(),
-    title,
-    url,
-    description: description || '',
-    imageUrl: req.file ? `/uploads/${req.file.filename}` : null,
-    category: category || '',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-  data.links.push(link);
-  writeLinks(data);
-  res.status(201).json(link);
 });
 
-app.put('/api/links/:id', authMiddleware, upload.single('image'), (req, res) => {
-  const data = readLinks();
-  const idx = data.links.findIndex(l => l.id === req.params.id);
-  if (idx === -1) {
-    return res.status(404).json({ error: '連結不存在' });
-  }
-  const existing = data.links[idx];
-  const { title, url, description, category } = req.body;
-  if (title !== undefined) existing.title = title;
-  if (url !== undefined) existing.url = url;
-  if (description !== undefined) existing.description = description;
-  if (category !== undefined) existing.category = category;
-  if (req.file) {
-    if (existing.imageUrl) {
-      const oldPath = path.join(UPLOADS_DIR, existing.imageUrl.replace(/^\/uploads\//, ''));
-      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+app.put('/api/links/:id', authMiddleware, upload.single('image'), async (req, res) => {
+  try {
+    const data = readLinks();
+    const idx = data.links.findIndex(l => l.id === req.params.id);
+    if (idx === -1) {
+      if (req.file) {
+        const tmp = path.join(UPLOADS_DIR, req.file.filename);
+        if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+      }
+      return res.status(404).json({ error: '連結不存在' });
     }
-    existing.imageUrl = `/uploads/${req.file.filename}`;
+    const existing = data.links[idx];
+    const { title, url, description, category } = req.body;
+    if (title !== undefined) existing.title = title;
+    if (url !== undefined) existing.url = url;
+    if (description !== undefined) existing.description = description;
+    if (category !== undefined) existing.category = category;
+    if (req.file) {
+      if (existing.imageUrl) {
+        const oldPath = path.join(UPLOADS_DIR, existing.imageUrl.replace(/^\/uploads\//, ''));
+        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+      }
+      const compressedFilename = await compressImage(path.join(UPLOADS_DIR, req.file.filename));
+      existing.imageUrl = `/uploads/${compressedFilename}`;
+    }
+    existing.updatedAt = new Date().toISOString();
+    data.links[idx] = existing;
+    writeLinks(data);
+    res.json(existing);
+  } catch (err) {
+    console.error('Image compression error:', err);
+    if (req.file) {
+      const tmp = path.join(UPLOADS_DIR, req.file.filename);
+      if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+    }
+    res.status(500).json({ error: '圖片處理失敗，請重試' });
   }
-  existing.updatedAt = new Date().toISOString();
-  data.links[idx] = existing;
-  writeLinks(data);
-  res.json(existing);
 });
 
 app.delete('/api/links/:id', authMiddleware, (req, res) => {
