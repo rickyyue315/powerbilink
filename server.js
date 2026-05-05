@@ -70,52 +70,50 @@ async function createWatermarkBuffer(width, height) {
 }
 
 async function compressImage(filePath) {
-  const outputPath = filePath.replace(/\.[^.]+$/, '.webp');
-  const metadata = await sharp(filePath).metadata();
-  const origW = metadata.width;
-  const origH = metadata.height;
+  try {
+    const outputPath = filePath.replace(/\.[^.]+$/, '.webp');
+    const metadata = await sharp(filePath).metadata();
+    const origW = metadata.width;
+    const origH = metadata.height;
 
-  const qualitySteps = [40, 25, 15, 8, 5];
-  const scaleSteps = [1, 0.75, 0.5, 0.35];
+    if (!origW || !origH) throw new Error('Cannot read image dimensions');
 
-  let bestBuf = null;
+    const qualitySteps = [40, 25, 15, 8, 5];
+    const scaleSteps = [1, 0.75, 0.5, 0.35];
+    let bestBuf = null;
 
-  for (const scale of scaleSteps) {
-    const maxW = Math.max(Math.round(MAX_IMAGE_WIDTH * scale), 50);
-    const maxH = Math.max(Math.round(MAX_IMAGE_HEIGHT * scale), 38);
-    const { w, h } = fitInsideDims(origW, origH, maxW, maxH);
+    for (const scale of scaleSteps) {
+      const maxW = Math.max(Math.round(MAX_IMAGE_WIDTH * scale), 50);
+      const maxH = Math.max(Math.round(MAX_IMAGE_HEIGHT * scale), 38);
+      const { w, h } = fitInsideDims(origW, origH, maxW, maxH);
+      const wmBuf = await createWatermarkBuffer(w, h);
 
-    const wmBuf = await createWatermarkBuffer(w, h);
+      for (const quality of qualitySteps) {
+        let pipeline = sharp(filePath)
+          .resize(w, h, { fit: 'inside', withoutEnlargement: true });
 
-    for (const quality of qualitySteps) {
-      let pipeline = sharp(filePath)
-        .resize(w, h, { fit: 'inside', withoutEnlargement: true });
+        if (wmBuf) {
+          try { pipeline = pipeline.composite([{ input: wmBuf, blend: 'over' }]); } catch {}
+        }
 
-      if (wmBuf) {
-        try {
-          pipeline = pipeline.composite([{ input: wmBuf, blend: 'over' }]);
-        } catch {}
-      }
+        const buf = await pipeline.webp({ quality, effort: 4 }).toBuffer();
 
-      const buf = await pipeline
-        .webp({ quality, effort: 4 })
-        .toBuffer();
-
-      if (buf.length <= TARGET_SIZE_BYTES) {
-        fs.writeFileSync(outputPath, buf);
-        fs.unlinkSync(filePath);
-        return path.basename(outputPath);
-      }
-
-      if (!bestBuf || buf.length < bestBuf.length) {
-        bestBuf = buf;
+        if (buf.length <= TARGET_SIZE_BYTES) {
+          fs.writeFileSync(outputPath, buf);
+          fs.unlinkSync(filePath);
+          return path.basename(outputPath);
+        }
+        if (!bestBuf || buf.length < bestBuf.length) bestBuf = buf;
       }
     }
-  }
 
-  fs.writeFileSync(outputPath, bestBuf);
-  fs.unlinkSync(filePath);
-  return path.basename(outputPath);
+    fs.writeFileSync(outputPath, bestBuf);
+    fs.unlinkSync(filePath);
+    return path.basename(outputPath);
+  } catch (err) {
+    console.error('compressImage failed, keeping original:', err.message);
+    return path.basename(filePath);
+  }
 }
 
 function readLinks() {
@@ -181,82 +179,64 @@ app.get('/api/categories', (req, res) => {
 });
 
 app.post('/api/links', authMiddleware, upload.single('image'), async (req, res) => {
-  try {
-    const { title, url, description, category } = req.body;
-    if (!title || !url) {
-      if (req.file) {
-        const tmp = path.join(UPLOADS_DIR, req.file.filename);
-        if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
-      }
-      return res.status(400).json({ error: '標題和網址為必填' });
-    }
-
-    let imageFilename = null;
-    if (req.file) {
-      imageFilename = await compressImage(path.join(UPLOADS_DIR, req.file.filename));
-    }
-
-    const data = readLinks();
-    const link = {
-      id: uuidv4(),
-      title,
-      url,
-      description: description || '',
-      imageUrl: imageFilename ? `/uploads/${imageFilename}` : null,
-      category: category || '',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    data.links.push(link);
-    writeLinks(data);
-    res.status(201).json(link);
-  } catch (err) {
-    console.error('Image compression error:', err);
+  const { title, url, description, category } = req.body;
+  if (!title || !url) {
     if (req.file) {
       const tmp = path.join(UPLOADS_DIR, req.file.filename);
       if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
     }
-    res.status(500).json({ error: '圖片處理失敗: ' + (err.message || String(err)) });
+    return res.status(400).json({ error: '標題和網址為必填' });
   }
+
+  let imageFilename = null;
+  if (req.file) {
+    imageFilename = await compressImage(path.join(UPLOADS_DIR, req.file.filename));
+  }
+
+  const data = readLinks();
+  const link = {
+    id: uuidv4(),
+    title,
+    url,
+    description: description || '',
+    imageUrl: imageFilename ? `/uploads/${imageFilename}` : null,
+    category: category || '',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  data.links.push(link);
+  writeLinks(data);
+  res.status(201).json(link);
 });
 
 app.put('/api/links/:id', authMiddleware, upload.single('image'), async (req, res) => {
-  try {
-    const data = readLinks();
-    const idx = data.links.findIndex(l => l.id === req.params.id);
-    if (idx === -1) {
-      if (req.file) {
-        const tmp = path.join(UPLOADS_DIR, req.file.filename);
-        if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
-      }
-      return res.status(404).json({ error: '連結不存在' });
-    }
-    const existing = data.links[idx];
-    const { title, url, description, category } = req.body;
-    if (title !== undefined) existing.title = title;
-    if (url !== undefined) existing.url = url;
-    if (description !== undefined) existing.description = description;
-    if (category !== undefined) existing.category = category;
-    if (req.file) {
-      if (existing.imageUrl) {
-        const oldPath = path.join(UPLOADS_DIR, existing.imageUrl.replace(/^\/uploads\//, ''));
-        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-      }
-      const compressedFilename = await compressImage(path.join(UPLOADS_DIR, req.file.filename));
-      existing.imageUrl = `/uploads/${compressedFilename}`;
-    }
-    existing.updatedAt = new Date().toISOString();
-    data.links[idx] = existing;
-    writeLinks(data);
-    res.json(existing);
-  } catch (err) {
-    console.error('Image compression error:', err);
+  const data = readLinks();
+  const idx = data.links.findIndex(l => l.id === req.params.id);
+  if (idx === -1) {
     if (req.file) {
       const tmp = path.join(UPLOADS_DIR, req.file.filename);
       if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
     }
-    res.status(500).json({ error: '圖片處理失敗: ' + (err.message || String(err)) });
+    return res.status(404).json({ error: '連結不存在' });
   }
+  const existing = data.links[idx];
+  const { title, url, description, category } = req.body;
+  if (title !== undefined) existing.title = title;
+  if (url !== undefined) existing.url = url;
+  if (description !== undefined) existing.description = description;
+  if (category !== undefined) existing.category = category;
+  if (req.file) {
+    if (existing.imageUrl) {
+      const oldPath = path.join(UPLOADS_DIR, existing.imageUrl.replace(/^\/uploads\//, ''));
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    }
+    const compressedFilename = await compressImage(path.join(UPLOADS_DIR, req.file.filename));
+    existing.imageUrl = `/uploads/${compressedFilename}`;
+  }
+  existing.updatedAt = new Date().toISOString();
+  data.links[idx] = existing;
+  writeLinks(data);
+  res.json(existing);
 });
 
 app.delete('/api/links/:id', authMiddleware, (req, res) => {

@@ -121,7 +121,7 @@ function createCard(link) {
 
   var imageHtml = '';
   if (link.imageUrl) {
-    imageHtml = '<img src="' + escapeHtml(link.imageUrl) + '" alt="' + escapeHtml(link.title) + '" loading="lazy">';
+    imageHtml = '<img src="' + escapeHtml(link.imageUrl) + '" alt="' + escapeHtml(link.title) + '" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;no-image&quot;><svg width=&quot;40&quot; height=&quot;40&quot; viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;1.5&quot;><rect x=&quot;3&quot; y=&quot;3&quot; width=&quot;18&quot; height=&quot;18&quot; rx=&quot;2&quot;/><circle cx=&quot;8.5&quot; cy=&quot;8.5&quot; r=&quot;1.5&quot;/><polyline points=&quot;21 15 16 10 5 21&quot;/></svg><span>圖片載入失敗</span></div>\'">';
   } else {
     imageHtml = '<div class="no-image"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg><span>暫無截圖</span></div>';
   }

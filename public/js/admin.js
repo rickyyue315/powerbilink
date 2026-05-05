@@ -55,6 +55,11 @@ function openEditLink(id) {
   resetImageUpload();
   if (link.imageUrl) {
     imagePreview.src = link.imageUrl;
+    imagePreview.onerror = function () {
+      imagePreview.style.display = 'none';
+      uploadPlaceholder.style.display = 'flex';
+      existingImageUrl = null;
+    };
     imagePreview.style.display = 'block';
     uploadPlaceholder.style.display = 'none';
     removeImageBtn.style.display = 'inline-flex';
