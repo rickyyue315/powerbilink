@@ -60,23 +60,23 @@ function fitInsideDims(origW, origH, maxW, maxH) {
 
 async function compressImage(filePath) {
   try {
-    const ext = path.extname(filePath).toLowerCase();
-    const outputPath = filePath.replace(ext, '.jpg');
-
     const inputBuf = fs.readFileSync(filePath);
     const image = await Jimp.read(inputBuf);
 
     const { w, h } = fitInsideDims(image.bitmap.width, image.bitmap.height, MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT);
     image.resize({ w, h });
 
+    const ext = path.extname(filePath).toLowerCase();
     const quality = ext === '.gif' ? Math.max(IMAGE_QUALITY - 10, 5) : IMAGE_QUALITY;
-    const buf = await image.getBuffer('image/jpeg', { quality });
+    const outputName = `${Date.now()}-${Math.round(Math.random() * 1e9)}.jpg`;
+    const outputPath = path.join(path.dirname(filePath), outputName);
 
+    const buf = await image.getBuffer('image/jpeg', { quality });
     fs.writeFileSync(outputPath, buf);
     fs.unlinkSync(filePath);
-    const url = `/uploads/${path.basename(outputPath)}`;
-    console.log('compressImage OK:', url, w + 'x' + h, buf.length, 'bytes');
-    return path.basename(outputPath);
+
+    console.log('compressImage OK:', outputName, w + 'x' + h, buf.length, 'bytes');
+    return outputName;
   } catch (err) {
     console.error('compressImage failed, keeping original:', err.message);
     return path.basename(filePath);
@@ -146,37 +146,43 @@ app.get('/api/categories', (req, res) => {
 });
 
 app.post('/api/links', authMiddleware, upload.single('image'), async (req, res) => {
-  const { title, url, description, category } = req.body;
-  if (!title || !url) {
-    if (req.file) {
-      const tmp = path.join(UPLOADS_DIR, req.file.filename);
-      if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+  try {
+    const { title, url, description, category } = req.body;
+    if (!title || !url) {
+      if (req.file) {
+        const tmp = path.join(UPLOADS_DIR, req.file.filename);
+        if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+      }
+      return res.status(400).json({ error: '標題和網址為必填' });
     }
-    return res.status(400).json({ error: '標題和網址為必填' });
-  }
 
-  let imageFilename = null;
-  if (req.file) {
-    imageFilename = await compressImage(path.join(UPLOADS_DIR, req.file.filename));
-  }
+    let imageFilename = null;
+    if (req.file) {
+      imageFilename = await compressImage(path.join(UPLOADS_DIR, req.file.filename));
+    }
 
-  const data = readLinks();
-  const link = {
-    id: uuidv4(),
-    title,
-    url,
-    description: description || '',
-    imageUrl: imageFilename ? `/uploads/${imageFilename}` : null,
-    category: category || '',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-  data.links.push(link);
-  writeLinks(data);
-  res.status(201).json(link);
+    const data = readLinks();
+    const link = {
+      id: uuidv4(),
+      title,
+      url,
+      description: description || '',
+      imageUrl: imageFilename ? `/uploads/${imageFilename}` : null,
+      category: category || '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    data.links.push(link);
+    writeLinks(data);
+    res.status(201).json(link);
+  } catch (err) {
+    console.error('POST error:', err);
+    res.status(500).json({ error: err.message || String(err) });
+  }
 });
 
 app.put('/api/links/:id', authMiddleware, upload.single('image'), async (req, res) => {
+  try {
   const data = readLinks();
   const idx = data.links.findIndex(l => l.id === req.params.id);
   if (idx === -1) {
@@ -204,6 +210,10 @@ app.put('/api/links/:id', authMiddleware, upload.single('image'), async (req, re
   data.links[idx] = existing;
   writeLinks(data);
   res.json(existing);
+  } catch (err) {
+    console.error('PUT error:', err);
+    res.status(500).json({ error: err.message || String(err) });
+  }
 });
 
 app.delete('/api/links/:id', authMiddleware, (req, res) => {
