@@ -267,7 +267,7 @@ function initTheme() {
 
 function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
-  themeToggle.textContent = theme === 'dark' ? '\u2600\uFE0F' : '\uD83C\uDF19';
+  themeToggle.textContent = theme === 'dark' ? '☀️ 淺色模式' : '🌙 深色模式';
 }
 
 themeToggle.addEventListener('click', function () {
