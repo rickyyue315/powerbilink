@@ -262,6 +262,20 @@ app.get('/api/diag', async (req, res) => {
   res.json(result);
 });
 
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  if (err.name === 'MulterError') {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: '圖片大小超過 10MB 限制' });
+    }
+    return res.status(400).json({ error: '圖片上傳失敗: ' + err.message });
+  }
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({ error: '請求內容過大' });
+  }
+  res.status(500).json({ error: err.message || '伺服器內部錯誤' });
+});
+
 app.listen(PORT, () => {
   console.log(`PowerBI Link Hub running at http://localhost:${PORT}`);
   try {
