@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-HK">
+<html lang="zh-HK" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -15,6 +15,7 @@
       PowerBI Report Hub
     </h1>
     <div class="header-actions">
+      <button id="themeToggle" class="btn btn-icon" title="切換深淺色模式">🌙</button>
       <button id="loginBtn" class="btn btn-outline">管理員登入</button>
       <button id="logoutBtn" class="btn btn-outline" style="display:none;">登出</button>
       <button id="addBtn" class="btn btn-primary" style="display:none;">+ 新增連結</button>
@@ -36,7 +37,7 @@
   <div id="linksContainer" class="cards-grid"></div>
 
   <div id="emptyState" class="empty-state" style="display:none;">
-    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
     <p>暫無 PowerBI 報表連結</p>
     <p class="sub">管理員登入後可新增連結</p>
   </div>

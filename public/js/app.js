@@ -11,6 +11,7 @@ var linksContainer = document.getElementById('linksContainer');
 var emptyState = document.getElementById('emptyState');
 var searchInput = document.getElementById('searchInput');
 var categoryFilter = document.getElementById('categoryFilter');
+var themeToggle = document.getElementById('themeToggle');
 var loginBtn = document.getElementById('loginBtn');
 var logoutBtn = document.getElementById('logoutBtn');
 var addBtn = document.getElementById('addBtn');
@@ -21,6 +22,7 @@ var loginForm = document.getElementById('loginForm');
 var loginError = document.getElementById('loginError');
 
 function init() {
+  initTheme();
   var savedToken = localStorage.getItem('pbhub_token');
   if (savedToken) {
     state.token = savedToken;
@@ -257,5 +259,22 @@ function debounce(fn, delay) {
     timer = setTimeout(fn, delay);
   };
 }
+
+function initTheme() {
+  var savedTheme = localStorage.getItem('pbhub_theme') || 'light';
+  applyTheme(savedTheme);
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  themeToggle.textContent = theme === 'dark' ? '\u2600\uFE0F' : '\uD83C\uDF19';
+}
+
+themeToggle.addEventListener('click', function () {
+  var currentTheme = document.documentElement.getAttribute('data-theme');
+  var newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+  applyTheme(newTheme);
+  localStorage.setItem('pbhub_theme', newTheme);
+});
 
 init();
