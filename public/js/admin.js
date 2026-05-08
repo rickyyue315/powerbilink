@@ -109,6 +109,18 @@ function handleImageSelect() {
 function removeImage() {
   existingImageUrl = null;
   resetImageUpload();
+  if (editingId) {
+    var form = document.getElementById('linkForm');
+    var marker = document.getElementById('removeImageMarker');
+    if (!marker) {
+      marker = document.createElement('input');
+      marker.type = 'hidden';
+      marker.name = 'removeImage';
+      marker.value = 'true';
+      marker.id = 'removeImageMarker';
+      form.appendChild(marker);
+    }
+  }
 }
 
 function handleLinkSubmit(e) {
@@ -134,7 +146,9 @@ function handleLinkSubmit(e) {
     body: formData
   })
     .then(function (r) {
-      return r.json().then(function (data) {
+      var data = {};
+      return r.text().then(function (text) {
+        try { data = JSON.parse(text); } catch {}
         if (!r.ok) throw new Error(data.error || '操作失敗');
         closeModal(linkModal);
         loadLinks();
@@ -153,7 +167,9 @@ function handleDeleteConfirm() {
 
   API('/api/links/' + deletingId, { method: 'DELETE' })
     .then(function (r) {
-      return r.json().then(function (data) {
+      var data = {};
+      return r.text().then(function (text) {
+        try { data = JSON.parse(text); } catch {}
         if (!r.ok) throw new Error(data.error || '刪除失敗');
         closeModal(deleteModal);
         loadLinks();

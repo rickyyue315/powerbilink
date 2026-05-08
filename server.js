@@ -26,7 +26,10 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/uploads/:filename', (req, res) => {
-  const filePath = path.join(UPLOADS_DIR, req.params.filename);
+  const filePath = path.join(UPLOADS_DIR, path.basename(req.params.filename));
+  if (!filePath.startsWith(UPLOADS_DIR)) {
+    return res.status(403).end();
+  }
   if (fs.existsSync(filePath)) {
     res.type(path.extname(filePath)).sendFile(filePath);
   } else {
@@ -135,7 +138,11 @@ app.get('/api/links', (req, res) => {
     links = links.filter(l => l.category === category);
   }
 
-  links.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  links.sort((a, b) => {
+    const da = new Date(a.createdAt).getTime() || 0;
+    const db = new Date(b.createdAt).getTime() || 0;
+    return db - da;
+  });
   res.json(links);
 });
 
@@ -154,6 +161,16 @@ app.post('/api/links', authMiddleware, upload.single('image'), async (req, res) 
         if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
       }
       return res.status(400).json({ error: '標題和網址為必填' });
+    }
+
+    try {
+      new URL(url);
+    } catch {
+      if (req.file) {
+        const tmp = path.join(UPLOADS_DIR, req.file.filename);
+        if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+      }
+      return res.status(400).json({ error: '網址格式不正確' });
     }
 
     let imageFilename = null;
@@ -194,10 +211,32 @@ app.put('/api/links/:id', authMiddleware, upload.single('image'), async (req, re
   }
   const existing = data.links[idx];
   const { title, url, description, category } = req.body;
-  if (title !== undefined) existing.title = title;
-  if (url !== undefined) existing.url = url;
+  if (title !== undefined) {
+    if (title.trim() === '') return res.status(400).json({ error: '標題不能為空' });
+    existing.title = title;
+  }
+  if (url !== undefined) {
+    if (url.trim() === '') return res.status(400).json({ error: '網址不能為空' });
+    try {
+      new URL(url);
+    } catch {
+      if (req.file) {
+        const tmp = path.join(UPLOADS_DIR, req.file.filename);
+        if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+      }
+      return res.status(400).json({ error: '網址格式不正確' });
+    }
+    existing.url = url;
+  }
   if (description !== undefined) existing.description = description;
   if (category !== undefined) existing.category = category;
+  if (req.body.removeImage === 'true') {
+    if (existing.imageUrl) {
+      const oldPath = path.join(UPLOADS_DIR, existing.imageUrl.replace(/^\/uploads\//, ''));
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    }
+    existing.imageUrl = null;
+  }
   if (req.file) {
     if (existing.imageUrl) {
       const oldPath = path.join(UPLOADS_DIR, existing.imageUrl.replace(/^\/uploads\//, ''));
@@ -262,7 +301,7 @@ app.get('/api/diag', async (req, res) => {
   res.json(result);
 });
 
-app.use((err, req, res, next) => {
+app.use((err, req, res, _next) => {
   console.error('Unhandled error:', err);
   if (err.name === 'MulterError') {
     if (err.code === 'LIMIT_FILE_SIZE') {

@@ -43,8 +43,14 @@ function bindEvents() {
   closeLinkBtn.addEventListener('click', function () { closeModal(linkModal); });
   closeDeleteBtn.addEventListener('click', function () { closeModal(deleteModal); });
 
-  searchInput.addEventListener('input', debounce(render, 250));
-  categoryFilter.addEventListener('change', render);
+  searchInput.addEventListener('input', debounce(loadLinks, 250));
+  categoryFilter.addEventListener('change', loadLinks);
+  themeToggle.addEventListener('click', function () {
+    var currentTheme = document.documentElement.getAttribute('data-theme');
+    var newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    applyTheme(newTheme);
+    localStorage.setItem('pbhub_theme', newTheme);
+  });
 }
 
 function API(path, opts) {
@@ -57,7 +63,13 @@ function API(path, opts) {
 }
 
 function loadLinks() {
-  API('/api/links')
+  var params = new URLSearchParams();
+  var search = searchInput.value.toLowerCase().trim();
+  var category = categoryFilter.value;
+  if (search) params.set('search', search);
+  if (category) params.set('category', category);
+  var queryStr = params.toString();
+  API('/api/links' + (queryStr ? '?' + queryStr : ''))
     .then(function (r) { return r.json(); })
     .then(function (links) {
       state.links = links;
@@ -85,33 +97,14 @@ function loadCategories() {
     .catch(function () {});
 }
 
-function getFilteredLinks() {
-  var links = state.links;
-  var search = searchInput.value.toLowerCase().trim();
-  var category = categoryFilter.value;
-
-  if (search) {
-    links = links.filter(function (l) {
-      return (l.title && l.title.toLowerCase().indexOf(search) !== -1) ||
-        (l.description && l.description.toLowerCase().indexOf(search) !== -1) ||
-        (l.url && l.url.toLowerCase().indexOf(search) !== -1);
-    });
-  }
-  if (category) {
-    links = links.filter(function (l) { return l.category === category; });
-  }
-  return links;
-}
-
 function render() {
-  var filtered = getFilteredLinks();
   linksContainer.innerHTML = '';
 
-  if (filtered.length === 0) {
+  if (state.links.length === 0) {
     emptyState.style.display = 'block';
   } else {
     emptyState.style.display = 'none';
-    filtered.forEach(function (link) {
+    state.links.forEach(function (link) {
       linksContainer.appendChild(createCard(link));
     });
   }
@@ -241,7 +234,7 @@ function closeModal(modal) {
 
 function escapeHtml(str) {
   if (!str) return '';
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function showToast(msg, type) {
@@ -269,12 +262,5 @@ function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
   themeToggle.textContent = theme === 'dark' ? '☀️ 淺色模式' : '🌙 深色模式';
 }
-
-themeToggle.addEventListener('click', function () {
-  var currentTheme = document.documentElement.getAttribute('data-theme');
-  var newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-  applyTheme(newTheme);
-  localStorage.setItem('pbhub_theme', newTheme);
-});
 
 init();
