@@ -96,6 +96,9 @@ function handleImageSelect() {
     return;
   }
 
+  var marker = document.getElementById('removeImageMarker');
+  if (marker) marker.remove();
+
   var reader = new FileReader();
   reader.onload = function (e) {
     imagePreview.src = e.target.result;

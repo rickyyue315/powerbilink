@@ -1,23 +1,25 @@
 require('dotenv').config();
 
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
-const { Jimp, JimpMime } = require('jimp');
+const { Jimp } = require('jimp');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '12345678';
 const JWT_SECRET = process.env.JWT_SECRET || 'powerbi-link-hub-secret';
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
-const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, 'uploads');
+const UPLOADS_DIR = path.normalize(process.env.UPLOADS_DIR || path.join(__dirname, 'uploads'));
 const DATA_FILE = path.join(DATA_DIR, 'links.json');
 const MAX_IMAGE_WIDTH = parseInt(process.env.MAX_IMAGE_WIDTH, 10) || 400;
 const MAX_IMAGE_HEIGHT = parseInt(process.env.MAX_IMAGE_HEIGHT, 10) || 300;
 const IMAGE_QUALITY = parseInt(process.env.IMAGE_QUALITY, 10) || 80;
+const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -25,8 +27,16 @@ if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: '嘗試次數過多，請 15 分鐘後再試' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 app.get('/uploads/:filename', (req, res) => {
-  const filePath = path.join(UPLOADS_DIR, path.basename(req.params.filename));
+  const filePath = path.normalize(path.join(UPLOADS_DIR, path.basename(req.params.filename)));
   if (!filePath.startsWith(UPLOADS_DIR)) {
     return res.status(403).end();
   }
@@ -47,7 +57,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: MAX_FILE_SIZE },
   fileFilter: (req, file, cb) => {
     const allowed = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tiff'];
     const ext = path.extname(file.originalname).toLowerCase();
@@ -99,6 +109,43 @@ function writeLinks(data) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf-8');
 }
 
+let writeQueue = [];
+let isWriting = false;
+
+function writeLinksAsync(data) {
+  return new Promise((resolve, reject) => {
+    writeQueue.push({ data, resolve, reject });
+    processWriteQueue();
+  });
+}
+
+function processWriteQueue() {
+  if (isWriting || writeQueue.length === 0) return;
+  isWriting = true;
+  const { data, resolve, reject } = writeQueue.shift();
+  try {
+    const fresh = readLinks();
+    const targetIdx = fresh.links.findIndex(l => l.id === data._targetId);
+    if (data._op === 'create') {
+      fresh.links.push(data._link);
+    } else if (data._op === 'update' && targetIdx !== -1) {
+      fresh.links[targetIdx] = data._link;
+    } else if (data._op === 'delete') {
+      const delIdx = fresh.links.findIndex(l => l.id === data._targetId);
+      if (delIdx !== -1) fresh.links.splice(delIdx, 1);
+    } else {
+      Object.assign(fresh, data);
+    }
+    writeLinks(fresh);
+    resolve(fresh);
+  } catch (err) {
+    reject(err);
+  } finally {
+    isWriting = false;
+    processWriteQueue();
+  }
+}
+
 function authMiddleware(req, res, next) {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
@@ -112,7 +159,7 @@ function authMiddleware(req, res, next) {
   }
 }
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', loginLimiter, (req, res) => {
   const { password } = req.body;
   if (password !== ADMIN_PASSWORD) {
     return res.status(401).json({ error: '密碼錯誤' });
@@ -190,7 +237,7 @@ app.post('/api/links', authMiddleware, upload.single('image'), async (req, res) 
       updatedAt: new Date().toISOString()
     };
     data.links.push(link);
-    writeLinks(data);
+    await writeLinksAsync({ _op: 'create', _link: link, _targetId: link.id, links: data.links });
     res.status(201).json(link);
   } catch (err) {
     console.error('POST error:', err);
@@ -247,7 +294,7 @@ app.put('/api/links/:id', authMiddleware, upload.single('image'), async (req, re
   }
   existing.updatedAt = new Date().toISOString();
   data.links[idx] = existing;
-  writeLinks(data);
+  await writeLinksAsync({ _op: 'update', _link: existing, _targetId: existing.id, links: data.links });
   res.json(existing);
   } catch (err) {
     console.error('PUT error:', err);
@@ -255,7 +302,8 @@ app.put('/api/links/:id', authMiddleware, upload.single('image'), async (req, re
   }
 });
 
-app.delete('/api/links/:id', authMiddleware, (req, res) => {
+app.delete('/api/links/:id', authMiddleware, async (req, res) => {
+  try {
   const data = readLinks();
   const idx = data.links.findIndex(l => l.id === req.params.id);
   if (idx === -1) {
@@ -266,16 +314,19 @@ app.delete('/api/links/:id', authMiddleware, (req, res) => {
     const oldPath = path.join(UPLOADS_DIR, removed.imageUrl.replace(/^\/uploads\//, ''));
     if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
   }
-  data.links.splice(idx, 1);
-  writeLinks(data);
+  await writeLinksAsync({ _op: 'delete', _targetId: req.params.id, links: data.links.filter(l => l.id !== req.params.id) });
   res.json({ success: true });
+  } catch (err) {
+    console.error('DELETE error:', err);
+    res.status(500).json({ error: err.message || String(err) });
+  }
 });
 
 app.post('/api/auth/verify', authMiddleware, (req, res) => {
   res.json({ valid: true });
 });
 
-app.get('/api/diag', async (req, res) => {
+app.get('/api/diag', authMiddleware, async (req, res) => {
   const result = {};
   try {
     const pixels = Buffer.alloc(400 * 300 * 4);
@@ -305,7 +356,7 @@ app.use((err, req, res, _next) => {
   console.error('Unhandled error:', err);
   if (err.name === 'MulterError') {
     if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(413).json({ error: '圖片大小超過 10MB 限制' });
+      return res.status(413).json({ error: '圖片大小超過 5MB 限制' });
     }
     return res.status(400).json({ error: '圖片上傳失敗: ' + err.message });
   }
