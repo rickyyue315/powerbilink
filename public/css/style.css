@@ -416,7 +416,7 @@ body {
   --text-secondary: #a3a3a3;
   --border: #262626;
   --shadow: 0 2px 8px rgba(0,0,0,0.3);
-  --shadow-hover: 0 4px 16px rgba(0,0,0,0.4);
+  --shadow-hover: 0 4px 16px rgba(255,255,255,0.08);
 }
 
 [data-theme="dark"] .btn-outline:hover { border-color: var(--text-secondary); background: #222; }
