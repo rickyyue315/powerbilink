@@ -51,7 +51,7 @@ const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOADS_DIR),
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
+    cb(null, `${uuidv4()}-${Date.now()}${ext}`);
   }
 });
 
@@ -80,11 +80,13 @@ async function compressImage(filePath) {
     image.resize({ w, h });
 
     const ext = path.extname(filePath).toLowerCase();
-    const quality = ext === '.gif' ? Math.max(IMAGE_QUALITY - 10, 5) : IMAGE_QUALITY;
-    const outputName = `${Date.now()}-${Math.round(Math.random() * 1e9)}.jpg`;
+    const isJpeg = ext === '.jpg' || ext === '.jpeg';
+    const mime = isJpeg ? 'image/jpeg' : 'image/png';
+    const outputExt = isJpeg ? '.jpg' : '.png';
+    const outputName = `${uuidv4()}-${Date.now()}${outputExt}`;
     const outputPath = path.join(path.dirname(filePath), outputName);
 
-    const buf = await image.getBuffer('image/jpeg', { quality });
+    const buf = image.getBuffer(mime, isJpeg ? { quality: IMAGE_QUALITY } : undefined);
     fs.writeFileSync(outputPath, buf);
     fs.unlinkSync(filePath);
 
@@ -106,7 +108,9 @@ function readLinks() {
 }
 
 function writeLinks(data) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  const tmp = DATA_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
+  fs.renameSync(tmp, DATA_FILE);
 }
 
 let writeQueue = [];
@@ -134,7 +138,7 @@ function processWriteQueue() {
       const delIdx = fresh.links.findIndex(l => l.id === data._targetId);
       if (delIdx !== -1) fresh.links.splice(delIdx, 1);
     } else {
-      Object.assign(fresh, data);
+      throw new Error('未知的寫入操作: ' + data._op);
     }
     writeLinks(fresh);
     resolve(fresh);
@@ -236,8 +240,7 @@ app.post('/api/links', authMiddleware, upload.single('image'), async (req, res) 
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-    data.links.push(link);
-    await writeLinksAsync({ _op: 'create', _link: link, _targetId: link.id, links: data.links });
+    await writeLinksAsync({ _op: 'create', _link: link, _targetId: link.id });
     res.status(201).json(link);
   } catch (err) {
     console.error('POST error:', err);
@@ -259,11 +262,23 @@ app.put('/api/links/:id', authMiddleware, upload.single('image'), async (req, re
   const existing = data.links[idx];
   const { title, url, description, category } = req.body;
   if (title !== undefined) {
-    if (title.trim() === '') return res.status(400).json({ error: '標題不能為空' });
+    if (title.trim() === '') {
+      if (req.file) {
+        const tmp = path.join(UPLOADS_DIR, req.file.filename);
+        if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+      }
+      return res.status(400).json({ error: '標題不能為空' });
+    }
     existing.title = title;
   }
   if (url !== undefined) {
-    if (url.trim() === '') return res.status(400).json({ error: '網址不能為空' });
+    if (url.trim() === '') {
+      if (req.file) {
+        const tmp = path.join(UPLOADS_DIR, req.file.filename);
+        if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+      }
+      return res.status(400).json({ error: '網址不能為空' });
+    }
     try {
       new URL(url);
     } catch {
@@ -294,7 +309,7 @@ app.put('/api/links/:id', authMiddleware, upload.single('image'), async (req, re
   }
   existing.updatedAt = new Date().toISOString();
   data.links[idx] = existing;
-  await writeLinksAsync({ _op: 'update', _link: existing, _targetId: existing.id, links: data.links });
+  await writeLinksAsync({ _op: 'update', _link: existing, _targetId: existing.id });
   res.json(existing);
   } catch (err) {
     console.error('PUT error:', err);
@@ -314,7 +329,7 @@ app.delete('/api/links/:id', authMiddleware, async (req, res) => {
     const oldPath = path.join(UPLOADS_DIR, removed.imageUrl.replace(/^\/uploads\//, ''));
     if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
   }
-  await writeLinksAsync({ _op: 'delete', _targetId: req.params.id, links: data.links.filter(l => l.id !== req.params.id) });
+  await writeLinksAsync({ _op: 'delete', _targetId: req.params.id });
   res.json({ success: true });
   } catch (err) {
     console.error('DELETE error:', err);
