@@ -26,6 +26,7 @@ if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+app.set('trust proxy', 1);
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
